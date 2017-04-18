@@ -7,56 +7,16 @@
 
 #include <hpx/config.hpp>
 
-//#define OCTOTIGER_RESTART_LOAD_SEQ
-
-//#define OCTOTIGER_USE_NODE_CACHE
-
-#ifdef OCTOTIGER_HAVE_GRAV_PAR
-# define USE_GRAV_PAR
-#endif
 
 #define icoarse(i,j,k) ((k) * (NX * NX / 4) + (j) * (NX / 2) + (i))
 
-#ifdef OCTOTIGER_HAVE_SILO
-# define DO_OUTPUT
-#endif
+#ifndef _____DEFS_____HPP
+#define _____DEFS_____HPP
 
-//#define OCTOTIGER_HAVE_RADIATION
-
-#ifdef OCTOTIGER_HAVE_RADIATION
-#define RADIATION
-#endif
-
-#ifndef TYPES444_HPP_
-
-//#define CWD
-#define BIBI
-//#define OLD_SCF
-
-//#define WD_EOS
-
-#define EXPERIMENT
-#ifdef RADIATION
-#define NRF 4
-#else
-#define NRF 0
-#define NRADF 0
-#endif
-
-#define NPF 5
 
 #define abort_error() printf( "Error in %s on line %i\n", __FILE__, __LINE__); abort()
 
 #define USE_SIMD
-
-//#define USE_DRIVING
-#define DRIVING_RATE 0.01
-#define DRIVING_TIME 1.00
-
-#define ZCORRECT
-
-#define USE_PPM
-//#define USE_MINMOD
 
 #if !defined(OCTOTIGER_FORCEINLINE)
 #   if defined(__NVCC__) || defined(__CUDACC__)
@@ -72,37 +32,14 @@
 
 #include "real.hpp"
 typedef long long int integer;
-#define TYPES444_HPP_
 
 typedef unsigned char byte;
-
-enum gsolve_type {
-	RHO, DRHODT
-};
 
 #include <array>
 #include <iostream>
 
-#define USE_ROTATING_FRAME
-//#define OUTPUT_FREQ (100.0)
-
-//#define USE_SPHERICAL
-constexpr integer M_POLES = 3;
-constexpr integer L_POLES = M_POLES;
-
-//#define GRID_SIZE real(2.0)
-
-constexpr real DEFAULT_OMEGA = 0.0;
-
-//const integer MAX_LEVEL = 5;
-
-enum boundary_type {
-	OUTFLOW, REFLECT
-};
 
 constexpr integer NDIM = 3;
-
-constexpr integer NSPECIES = 5;
 
 constexpr integer INX = 8;
 constexpr integer BW = 2;

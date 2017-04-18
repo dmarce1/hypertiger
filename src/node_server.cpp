@@ -24,7 +24,6 @@
 #include <hpx/include/util.hpp>
 #include <hpx/runtime/threads/run_as_os_thread.hpp>
 
-
 std::vector<real> node_server::outflows(physics::NF, 0.0);
 
 real node_server::get_rotation_count() const {
@@ -320,8 +319,6 @@ node_server::node_server(const node_location& _my_location, integer _step_num,
 	child_descendant_count = _child_d;
 }
 
-
-
 void node_server::recv_hydro_boundary(std::vector<simd_vector>&& bdata,
 		const geo::direction& dir, std::size_t cycle) {
 	sibling_hydro_type tmp;
@@ -384,12 +381,11 @@ void node_server::amr_driver() {
 
 		real dt = 0;
 
-		integer next_step = (std::min)(step_num + 15,
-				opts.stop_step + 1);
+		integer next_step = (std::min)(step_num + 15, opts.stop_step + 1);
 		real omega_dot = 0.0, omega = 0.0, theta = 0.0, theta_dot = 0.0;
 
 		auto rc = step(next_step - step_num).get();
-		for( integer f = 0; f != physics::NF; ++f) {
+		for (integer f = 0; f != physics::NF; ++f) {
 			outflows[f] += rc.first[f].sum();
 		}
 		dt = rc.second;
@@ -417,9 +413,6 @@ void node_server::amr_driver() {
 			output(opts.data_dir, "final", output_cnt);
 	}
 }
-
-
-
 
 hpx::future<std::vector<simd_vector>> node_server::grid_step() {
 #if HPX_HAVE_ITTNOTIFY != 0 && !defined(HPX_HAVE_APEX)
@@ -493,7 +486,7 @@ hpx::future<std::vector<simd_vector>> node_server::grid_step() {
 hpx::future<std::pair<std::vector<simd_vector>, real>> node_server::local_step(
 		integer steps) {
 	auto fut = hpx::make_ready_future(
-			std::make_pair(std::vector<simd_vector>(), 0.0));
+			std::make_pair(std::vector<simd_vector>(physics::NF, 0.0), 0.0));
 	for (integer i = 0; i != steps; ++i) {
 		fut =
 				fut.then(
@@ -606,8 +599,6 @@ hpx::future<real> node_server::timestep_driver_descend() {
 	}
 }
 
-
-
 /*
  * node_server_actions_1.cpp
  *
@@ -633,7 +624,6 @@ hpx::future<real> node_server::timestep_driver_descend() {
 #include <hpx/lcos/broadcast.hpp>
 
 #include <boost/iostreams/stream.hpp>
-
 
 void parallel_output_gather(grid::output_list_type);
 void parallel_output_complete(std::string dirname, std::string fname,
@@ -843,8 +833,6 @@ grid::output_list_type node_server::output(std::string dname, std::string fname,
 	}
 }
 
-
-
 integer node_server::regrid_gather(bool rebalance_only) {
 	integer count = integer(1);
 
@@ -922,8 +910,6 @@ hpx::future<hpx::id_type> node_server::create_child(
 						return child_id;
 					});
 }
-
-
 
 hpx::future<void> node_server::regrid_scatter(integer a_, integer total) {
 	refinement_flag = 0;
@@ -1003,7 +989,6 @@ integer node_server::regrid(const hpx::id_type& root_gid, bool rb) {
 			elapsed);
 	return a;
 }
-
 
 std::map<integer, std::vector<char> > node_server::save_local(integer& cnt,
 		std::string const& filename, hpx::future<void>& child_fut) const {
@@ -1116,7 +1101,6 @@ hpx::future<void> node_server::save(integer cnt,
 	return hpx::when_all(fut, child_fut);
 }
 
-
 void node_server::set_aunt(const hpx::id_type& aunt, const geo::face& face) {
 	aunts[face] = aunt;
 }
@@ -1124,9 +1108,6 @@ void node_server::set_aunt(const hpx::id_type& aunt, const geo::face& face) {
 void node_server::set_grid(const std::vector<simd_vector>& data) {
 	grid_ptr->set_prolong(data);
 }
-
-
-
 
 hpx::future<void> node_server::check_for_refinement() {
 	bool rc = false;
@@ -1156,7 +1137,6 @@ hpx::future<void> node_server::check_for_refinement() {
 	}
 }
 
-
 hpx::future<hpx::id_type> node_server::copy_to_locality(
 		const hpx::id_type& id) {
 
@@ -1174,8 +1154,6 @@ hpx::future<hpx::id_type> node_server::copy_to_locality(
 	clear_family();
 	return rc;
 }
-
-
 
 void node_server::force_nodes_to_exist(std::vector<node_location>&& locs) {
 	std::vector<hpx::future<void>> futs;
@@ -1223,8 +1201,6 @@ void node_server::force_nodes_to_exist(std::vector<node_location>&& locs) {
 
 	wait_all_and_propagate_exceptions(futs);
 }
-
-
 
 hpx::future<void> node_server::form_tree(hpx::id_type self_gid,
 		hpx::id_type parent_gid, std::vector<hpx::id_type> neighbor_gids) {
@@ -1316,8 +1292,6 @@ hpx::future<void> node_server::form_tree(hpx::id_type self_gid,
 	}
 }
 
-
-
 hpx::id_type node_server::get_child_client(const geo::octant& ci) {
 	if (is_refined) {
 		return children[ci].get_gid();
@@ -1338,7 +1312,6 @@ bool node_server::set_child_aunt(const hpx::id_type& aunt,
 	}
 	return is_refined;
 }
-
 
 std::uintptr_t node_server::get_ptr() {
 	return reinterpret_cast<std::uintptr_t>(this);

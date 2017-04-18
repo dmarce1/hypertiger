@@ -14,18 +14,6 @@
 #include <functional>
 #include "geometry.hpp"
 class euler_type {
-private:
-	static constexpr real fgamma = 7.0 / 5.0;
-	static constexpr integer d_i = 0;
-	static constexpr integer e_i = 1;
-	static constexpr integer sxi = 2;
-	static constexpr integer syi = 3;
-	static constexpr integer szi = 4;
-
-	static constexpr integer t_i = 1;
-	static constexpr integer vxi = 2;
-	static constexpr integer vyi = 3;
-	static constexpr integer vzi = 4;
 public:
 	static constexpr integer NF = 5;
 	using vector_type = std::vector<simd_vector>;
@@ -34,6 +22,8 @@ public:
 	static bool refinement_test(integer, const std::vector<simd_vector>&,
 			const vector_type&, const std::array<vector_type, NDIM>&);
 	static vector_type to_prim(const vector_type&);
+	static vector_type to_con(const vector_type&);
+	static std::pair<vector_type, simd_vector> physical_flux( const vector_type& , const vector_type&, integer dim);
 	static std::pair<vector_type, simd_vector> to_fluxes(const vector_type&,
 			const vector_type&, integer dim);
 	static vector_type explicit_source(const vector_type&);

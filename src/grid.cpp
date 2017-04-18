@@ -269,10 +269,10 @@ void grid::set_coordinates() {
 	is_physical[FXP] = bool((xmin[XDIM] + dx) > opts.xscale);
 	is_physical[FYP] = bool((xmin[YDIM] + dx) > opts.xscale);
 	is_physical[FZP] = bool((xmin[ZDIM] + dx) > opts.xscale);
-	for (integer f = 0; f != NDIM; ++f) {
-		outflow_mask[NDIM] = simd_vector(0.0);
-	}
 	std::call_once(flag, [this]() {
+		for (integer f = 0; f != NDIM; ++f) {
+			outflow_mask[NDIM] = simd_vector(0.0);
+		}
 		for (integer i = 0; i != 2; ++i) {
 			for (integer j = 0; j != 2; ++j) {
 				outflow_mask[XDIM][geo::octant( {0, i, j})] = ONE;
@@ -308,14 +308,19 @@ grid::grid(const real _dx, std::array<real, NDIM> _xmin, bool initialize) {
 	}
 }
 
-real grid::compute_fluxes() {
-	simd_vector max_lambda(0.0);
+simd_grid<physics::NF> grid::primitives() const {
 	simd_grid<physics::NF> V;
-	simd_grid<physics::NF> VR;
-	simd_grid<physics::NF> VL;
 	for (integer i = 0; i != V_N3; ++i) {
 		V.set(physics::to_prim(U[i]), i);
 	}
+	return V;
+}
+
+real grid::compute_fluxes() {
+	simd_vector max_lambda(0.0);
+	simd_grid<physics::NF> VR;
+	simd_grid<physics::NF> VL;
+	const auto V = primitives();
 	for (integer dim = 0; dim != NDIM; ++dim) {
 		for (integer i = 0; i != U.size(); ++i) {
 			const auto sp = V.get_shift(dim, +1, i) - V(i);
@@ -387,7 +392,8 @@ void grid::compute_sources(real t) {
 
 void grid::compute_dudt() {
 	const auto dxinv = simd_vector(1.0) / simd_vector(dx);
-	std::vector<simd_vector> outflow(physics::NF, simd_vector(0.0));
+	oflux.resize(physics::NF);
+	std::vector<simd_vector> outflow(physics::NF);
 	for (integer dim = 0; dim != NDIM; ++dim) {
 		for (integer i = 1; i != NX / 2 - 1; ++i) {
 			for (integer j = 1; j != NX / 2 - 1; ++j) {
@@ -527,6 +533,8 @@ grid::output_list_type grid::get_output_list() const {
 	std::vector<zone_int_type>& zone_list = rc.zones;
 	std::array<std::vector<real>, physics::NF> &data = rc.data;
 
+	const auto V = primitives();
+
 	zone_list.reserve(cube(NX - 2 * BW) * NCHILD);
 	for (integer i = BW; i != NX - BW; ++i) {
 		for (integer j = BW; j != NX - BW; ++j) {
@@ -553,7 +561,7 @@ grid::output_list_type grid::get_output_list() const {
 					zone_list.push_back(index);
 				}
 				for (integer field = 0; field != physics::NF; ++field) {
-					data[field].push_back(U(i, j, k, field));
+					data[field].push_back(V(i, j, k, field));
 				}
 			}
 		}

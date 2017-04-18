@@ -57,6 +57,7 @@ public:
 	real get_dx() const {
 		return dx;
 	}
+	simd_grid<physics::NF> primitives() const;
 	void set_coordinates();
 	void set_hydro_boundary(const std::vector<simd_vector>&,
 			const geo::direction&);

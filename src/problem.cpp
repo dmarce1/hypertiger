@@ -10,105 +10,199 @@
 #include "options.hpp"
 #include "grid.hpp"
 #include <cmath>
+#include <utility>
 #include <hpx/include/lcos.hpp>
+
+constexpr integer euler_type::NF;
+static constexpr integer D_i = 0;
+static constexpr integer tau_i = 1;
+static constexpr integer Sx_i = 2;
+static constexpr integer Sy_i = 3;
+static constexpr integer Sz_i = 4;
+
+static constexpr integer rho_i = 0;
+static constexpr integer eps_i = 1;
+static constexpr integer vx_i = 2;
+static constexpr integer vy_i = 3;
+static constexpr integer vz_i = 4;
+
+static const simd_vector zero(0.0);
+static const simd_vector one(1.0);
+static const simd_vector two(2.0);
+static const simd_vector half(0.5);
+static const simd_vector fgamma(7.0 / 5.0);
 
 euler_type::vector_type euler_type::initial_value(
 		const std::vector<simd_vector>& x, real) {
 	std::vector<simd_vector> u(NF);
 	for (integer i = 0; i != simd_len; ++i) {
 		if (x[ZDIM][i] > 0.0) {
-			u[d_i][i] = 1.0;
-			u[e_i][i] = 1.0;
+			u[D_i][i] = 1.0;
+			u[tau_i][i] = 1.0 + u[D_i][i];
 		} else {
-			u[d_i][i] = 1.0e-1;
-			u[e_i][i] = 1.25e-1;
+			u[D_i][i] = 1.0e-1;
+			u[tau_i][i] = 1.25e-1 + u[D_i][i];
 		}
-		u[sxi][i] = u[syi][i] = u[szi][i] = 0.0;
+		u[Sx_i][i] = u[Sy_i][i] = u[Sz_i][i] = 0.0;
 	}
 	return u;
 }
 
 euler_type::vector_type euler_type::set_outflow(const geo::direction& dir,
 		vector_type&& u) {
-	for (integer d = 0; d != NDIM; ++d) {
-		if (dir[d] == -1) {
-			u[sxi + d] = min(u[sxi + d], simd_vector(0.0));
-		} else if (dir[d] == +1) {
-			u[sxi + d] = max(u[sxi + d], simd_vector(0.0));
-		}
-	}
+	/*	for (integer d = 0; d != NDIM; ++d) {
+	 if (dir[d] == -1) {
+	 u[sxi + d] = min(u[sxi + d], simd_vector(0.0));
+	 } else if (dir[d] == +1) {
+	 u[sxi + d] = max(u[sxi + d], simd_vector(0.0));
+	 }
+	 }*/
 	return std::move(u);
+}
+
+std::pair<euler_type::vector_type, simd_vector> euler_type::physical_flux(
+		const vector_type& u, const vector_type& v, integer dim) {
+	vector_type f(NF);
+	simd_vector a;
+	const auto& D = u[D_i];
+	const auto& tau = u[tau_i];
+	const auto& Sx = u[Sx_i];
+	const auto& Sy = u[Sy_i];
+	const auto& Sz = u[Sz_i];
+
+	const auto& rho = v[rho_i];
+	const auto& eps = v[eps_i];
+	const auto& vel = v[vx_i + dim];
+	const auto& vx = v[vx_i];
+	const auto& vy = v[vy_i];
+	const auto& vz = v[vz_i];
+
+	const auto p = (fgamma - one) * rho * eps;
+	const auto v2 = vx * vx + vy * vy + vz * vz;
+	const auto W = sqrt(one / (one - v2));
+	const auto Winv = one / W;
+	const auto h = rho * (one + eps) + p;
+	const auto hinv = h.inv();
+	const auto c2 = fgamma * p * h;
+	const auto vel2 = vel * vel;
+	f[D_i] = D * vel;
+	f[Sx_i] = Sx * vel;
+	f[Sy_i] = Sy * vel;
+	f[Sz_i] = Sz * vel;
+	f[Sx_i + dim] += p;
+	f[tau_i] = (tau + p) * vel;
+	const auto onemv2c2 = one - v2 * c2;
+	const auto onemv2c2inv = one / onemv2c2;
+	const auto onemc2 = one - c2;
+	const auto a1 = onemv2c2inv * onemc2 * vel;
+	const auto a2 = onemv2c2inv * sqrt(c2 * Winv * (onemv2c2 - onemc2 * vel2));
+	a = abs(a1) + a2;
+	std::pair<vector_type, simd_vector> pr;
+	pr.first = std::move(f);
+	pr.second = std::move(a);
+	return pr;
+
+}
+
+euler_type::vector_type euler_type::to_con(const vector_type& v) {
+	std::vector<simd_vector> u(NF);
+
+	auto& D = u[D_i];
+	auto& tau = u[tau_i];
+	auto& Sx = u[Sx_i];
+	auto& Sy = u[Sy_i];
+	auto& Sz = u[Sz_i];
+
+	const auto& rho = v[rho_i];
+	const auto& eps = v[eps_i];
+	const auto& vx = v[vx_i];
+	const auto& vy = v[vy_i];
+	const auto& vz = v[vz_i];
+
+	const auto v2 = vx * vx + vy * vy + vz * vz;
+	const auto W = sqrt(one / (one - v2));
+	const auto W2 = W * W;
+	const auto p = (fgamma - 1.0) * rho * eps;
+	const auto h = rho * (one + fgamma * eps);
+	const auto x = W2 * h;
+	D = W * rho;
+	tau = x - p;
+	Sx = x * vx;
+	Sy = x * vy;
+	Sz = x * vz;
+
+	return u;
 }
 
 euler_type::vector_type euler_type::to_prim(const vector_type& u) {
 	std::vector<simd_vector> v(NF);
-	v[d_i] = u[d_i];
+	static const simd_vector k((fgamma - one) / fgamma);
 
-	/*********OPTIMIZE******/
-	auto dinv = u[d_i];
-	for (integer i = 0; i != simd_len; ++i) {
-		if (dinv[i] != 0.0) {
-			dinv[i] = 1.0 / dinv[i];
-		}
+	const auto& D = u[D_i];
+	auto tau = u[tau_i];
+	const auto& Sx = u[Sx_i];
+	const auto& Sy = u[Sy_i];
+	const auto& Sz = u[Sz_i];
+
+	auto& rho = v[rho_i];
+	auto& eps = v[eps_i];
+	auto& vx = v[vx_i];
+	auto& vy = v[vy_i];
+	auto& vz = v[vz_i];
+
+	simd_vector W, vel, f, dfdv;
+	simd_vector S(sqrt(Sx * Sx + Sy * Sy + Sz * Sz));
+
+	tau = max(tau, sqrt(S * S + D * D));
+
+	vel = S / D;
+	const auto Sinv = S.inv();
+	vel = min(abs(vel), simd_vector(0.999));
+	for (int i = 0; i < 8; ++i) {
+		W = sqrt(one / (one - vel * vel));
+		const simd_vector Winv(one / W);
+		const simd_vector W2inv(Winv * Winv);
+		f = (one - k * W2inv) * S + vel * k * D * Winv - vel * tau;
+		dfdv = k * (two * S * vel + D * (one - two * vel * vel) * W) - tau;
+		const auto v0 = vel;
+		vel = vel - f / dfdv;
+		const simd_vector b(0.1);
+		vel = max(b * v0, vel);
+		vel = min(one - b * (one - v0), vel);
 	}
-	/***************/
+	W = sqrt(one / (one - vel * vel));
+	rho = D / W;
+	eps = (tau / rho - W * W) / (fgamma * W * W - (fgamma - one));
+	vx = Sx * Sinv * vel;
+	vy = Sy * Sinv * vel;
+	vz = Sz * Sinv * vel;
+	eps = max(eps, zero);
+	/*for( integer i = 0; i != 8; ++i) {
+	 if( eps[i] < 0.0 ) {
+	 printf( "%e %e %e\n", D[i], tau[i], S[i]);
+	 }
+	 }*/
 
-	v[vxi] = u[sxi] * dinv;
-	v[vyi] = u[syi] * dinv;
-	v[vzi] = u[szi] * dinv;
-	v[t_i] = u[e_i];
-	v[t_i] -= simd_vector(0.5)
-			* (u[vxi] * u[vxi] + u[vyi] * u[vyi] + u[vzi] * u[vzi]);
-	v[t_i] = max(simd_vector(fgamma - 1.0) * v[t_i] * dinv, simd_vector(0.0));
 	return v;
 }
 
 std::pair<euler_type::vector_type, simd_vector> euler_type::to_fluxes(
 		const vector_type& vl, const vector_type& vr, integer dim) {
-	std::vector<simd_vector> f(NF);
+	std::vector<simd_vector> flux(NF);
 	std::pair<euler_type::vector_type, simd_vector> r;
 
-	/*********OPTIMIZE******/
-	auto dr_inv = vr[d_i];
-	auto dl_inv = vl[d_i];
-	for (integer i = 0; i != simd_len; ++i) {
-		if (dr_inv[i] != 0.0) {
-			dr_inv[i] = 1.0 / dr_inv[i];
-		}
-		if (dl_inv[i] != 0.0) {
-			dl_inv[i] = 1.0 / dl_inv[i];
-		}
-	}
-	/***************/
+	const auto ur = to_con(vr);
+	const auto ul = to_con(vl);
 
-	f[d_i] = simd_vector(0.5)
-			* (vl[d_i] * vl[vxi + dim] + vr[d_i] * vr[vxi + dim]);
-	for (integer d2 = 0; d2 != NDIM; ++d2) {
-		f[sxi + d2] = +vr[d_i] * vr[vxi + dim] * vr[vxi + d2];
-		f[sxi + d2] += vl[d_i] * vl[vxi + dim] * vl[vxi + d2];
-	}
-	const auto pl = vl[d_i] * vl[t_i];
-	const auto pr = vr[d_i] * vr[t_i];
-	const auto hl = pl * simd_vector(fgamma / (fgamma - 1.0));
-	const auto hr = pr * simd_vector(fgamma / (fgamma - 1.0));
-	const auto cl = sqrt(simd_vector(fgamma) * pl * dl_inv);
-	const auto cr = sqrt(simd_vector(fgamma) * pr * dr_inv);
-	const auto al = abs(vl[vxi + dim]) + cl;
-	const auto ar = abs(vr[vxi + dim]) + cr;
+	const auto fr = physical_flux(ur, vr, dim);
+	const auto fl = physical_flux(ul, vl, dim);
 
-	f[sxi + dim] += pl + pr;
-	f[e_i] = simd_vector(0.5) * (vl[vxi + dim] * hl + vr[vxi + dim] * hr);
-	for (integer d2 = 0; d2 != NDIM; ++d2) {
-		f[sxi + d2] *= simd_vector(0.5);
+	const auto a = max(fr.second, fl.second);
+	for (integer f = 0; f != NF; ++f) {
+		flux[f] = half * (fr.first[f] + fl.first[f]);
+		flux[f] -= half * a * (ur[f] - ul[f]);
 	}
-	auto a = max(al, ar);
-	f[d_i] -= simd_vector(0.5) * a * (vr[d_i] - vl[d_i]);
-	f[sxi] -= simd_vector(0.5) * a * (vr[d_i] * vr[vxi] - vl[d_i] * vl[vxi]);
-	f[syi] -= simd_vector(0.5) * a * (vr[d_i] * vr[vyi] - vl[d_i] * vl[vyi]);
-	f[szi] -= simd_vector(0.5) * a * (vr[d_i] * vr[vzi] - vl[d_i] * vl[vzi]);
-	f[e_i] -= simd_vector(0.5) * a * (vr[d_i] * vr[t_i] - vl[d_i] * vl[t_i])
-			/ simd_vector(fgamma - 1.0);
-	r.first = std::move(f);
+	r.first = std::move(flux);
 	r.second = std::move(a);
 	return r;
 }
@@ -116,7 +210,7 @@ std::pair<euler_type::vector_type, simd_vector> euler_type::to_fluxes(
 bool euler_type::refinement_test(integer level,
 		const std::vector<simd_vector>& x, const vector_type& u,
 		const std::array<vector_type, NDIM>& dudx) {
-	const auto max_level = opts.xscale;
+	const auto max_level = opts.max_level;
 	return level < max_level;
 }
 
@@ -134,11 +228,11 @@ euler_type::vector_type euler_type::implicit_source(const vector_type&, real) {
 
 std::vector<std::string> euler_type::field_names() {
 	std::vector<std::string> names(NF);
-	names[d_i] = "d";
-	names[e_i] = "e";
-	names[sxi] = "sx";
-	names[syi] = "sy";
-	names[szi] = "sz";
+	names[D_i] = "rho";
+	names[tau_i] = "eps";
+	names[Sx_i] = "vx";
+	names[Sy_i] = "vy";
+	names[Sz_i] = "vz";
 	return names;
 }
 

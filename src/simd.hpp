@@ -85,6 +85,27 @@ public:
 		}
 	}
 
+	inline simd_vector inv() const {
+		simd_vector c;
+		__mmask8 b;
+		constexpr __m256d zero = { 0.0, 0.0, 0.0, 0.0 };
+		constexpr __m256d one = { 1.0, 1.0, 1.0, 1.0 };
+		const auto* oneptr = reinterpret_cast<const double*>(&one);
+		for (integer d = 0; d != NDIM; ++d) {
+			const auto mask1_ = _mm256_cmp_pd(v[d], zero, _CMP_NEQ_UQ);
+			const auto mask2_ = _mm256_cmp_pd(v[d], zero, _CMP_EQ_UQ);
+			const auto mask1 = *(reinterpret_cast<const __m256i *>(&mask1_));
+			const auto mask2 = *(reinterpret_cast<const __m256i *>(&mask2_));
+			auto ptr = reinterpret_cast<const double*>(v + d);
+			auto a = _mm256_maskload_pd(ptr, mask1);
+			const auto* aptr = reinterpret_cast<const double*>(&a);
+			const auto b = _mm256_maskload_pd(oneptr, mask2);
+			a = _mm256_div_pd(one, _mm256_add_pd(a, b));
+			c.v[d] = _mm256_maskload_pd(aptr, mask1);
+		}
+		return c;
+	}
+
 	simd_vector() {
 		*this = 0;
 	}
