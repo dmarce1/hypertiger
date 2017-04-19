@@ -56,7 +56,7 @@ constexpr std::size_t simd_len = 8;
 
 class simd_vector {
 private:
-	__mxd v[SIMD_SIZE];
+	std::array<__mxd, SIMD_SIZE> v;
 public:
 	inline simd_vector shuffle(integer dim) const {
 		simd_vector r;
@@ -85,32 +85,34 @@ public:
 		}
 	}
 
-	inline simd_vector inv() const {
+	inline simd_vector inv_or_zero() const {
 		simd_vector c;
 		__mmask8 b;
 		constexpr __m256d zero = { 0.0, 0.0, 0.0, 0.0 };
-		constexpr __m256d one = { 1.0, 1.0, 1.0, 1.0 };
+		const __m256d one = { 1.0, 1.0, 1.0, 1.0 };
 		const auto* oneptr = reinterpret_cast<const double*>(&one);
 		for (integer d = 0; d != NDIM; ++d) {
 			const auto mask1_ = _mm256_cmp_pd(v[d], zero, _CMP_NEQ_UQ);
 			const auto mask2_ = _mm256_cmp_pd(v[d], zero, _CMP_EQ_UQ);
 			const auto mask1 = *(reinterpret_cast<const __m256i *>(&mask1_));
 			const auto mask2 = *(reinterpret_cast<const __m256i *>(&mask2_));
-			auto ptr = reinterpret_cast<const double*>(v + d);
+			auto ptr = reinterpret_cast<const double*>(v.data() + d);
 			auto a = _mm256_maskload_pd(ptr, mask1);
 			const auto* aptr = reinterpret_cast<const double*>(&a);
 			const auto b = _mm256_maskload_pd(oneptr, mask2);
 			a = _mm256_div_pd(one, _mm256_add_pd(a, b));
 			c.v[d] = _mm256_maskload_pd(aptr, mask1);
 		}
+		//	printf( "%e %e %e %e %e %e %e %e\n", c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7]);
+
 		return c;
 	}
-
-	simd_vector() {
-		*this = 0;
-	}
+	simd_vector() = default;
 	inline ~simd_vector() = default;
-	simd_vector(const simd_vector&) = default;
+	simd_vector(const simd_vector& other) {
+		v[0] = other.v[0];
+		v[1] = other.v[1];
+	}
 	inline simd_vector(double d) {
 		for (integer i = 0; i != SIMD_SIZE; ++i) {
 			v[i] = _mmx_set_pd(d);
@@ -123,20 +125,15 @@ public:
 		}
 		return r;
 	}
-	simd_vector(simd_vector&& other) {
-		*this = std::move(other);
-	}
-	inline simd_vector& operator=(const simd_vector& other) = default;
-	simd_vector& operator=(simd_vector&& other) {
-		for (integer i = 0; i != SIMD_SIZE; ++i) {
-			v[i] = std::move(other.v[i]);
-		}
+	inline simd_vector& operator=(const simd_vector& other) {
+		v[0] = other.v[0];
+		v[1] = other.v[1];
 		return *this;
 	}
 	inline simd_vector operator+(const simd_vector& other) const {
 		simd_vector r;
 		for (integer i = 0; i != SIMD_SIZE; ++i) {
-			//_mm_empty();
+//_mm_empty();
 			r.v[i] = _mmx_add_pd(v[i], other.v[i]);
 		}
 		return r;
@@ -144,7 +141,7 @@ public:
 	inline simd_vector operator-(const simd_vector& other) const {
 		simd_vector r;
 		for (integer i = 0; i != SIMD_SIZE; ++i) {
-			//_mm_empty();
+//_mm_empty();
 			r.v[i] = _mmx_sub_pd(v[i], other.v[i]);
 		}
 		return r;
@@ -152,7 +149,7 @@ public:
 	inline simd_vector operator*(const simd_vector& other) const {
 		simd_vector r;
 		for (integer i = 0; i != SIMD_SIZE; ++i) {
-			//_mm_empty();
+//_mm_empty();
 			r.v[i] = _mmx_mul_pd(v[i], other.v[i]);
 		}
 		return r;
@@ -160,7 +157,7 @@ public:
 	inline simd_vector operator/(const simd_vector& other) const {
 		simd_vector r;
 		for (integer i = 0; i != SIMD_SIZE; ++i) {
-			//_mm_empty();
+//_mm_empty();
 			r.v[i] = _mmx_div_pd(v[i], other.v[i]);
 		}
 		return r;
@@ -335,170 +332,6 @@ inline simd_vector min(const simd_vector& a, const simd_vector& b) {
 inline simd_vector abs(const simd_vector& a) {
 	return max(a, -a);
 }
-
-/*
- typedef double v4sd __attribute__ ((vector_size (32)));
- */
-class v4sd {
-private:
-	__m256d x;
-public:
-	inline v4sd& operator=(const v4sd& other) {
-		x = other.x;
-		return *this;
-	}
-	inline v4sd(const v4sd& other) {
-		x = other.x;
-	}
-	inline v4sd() {
-	}
-	inline v4sd(const std::initializer_list<double>& other) {
-		if (other.size() != 4) {
-			printf("Error file %s line %i\n", __FILE__, __LINE__);
-			abort();
-		}
-//		std::array<double, 4> n;
-		auto j = other.begin();
-		for (int i = 0; i != 4; ++i) {
-			(*this)[i] = *j;
-			++j;
-		}
-	}
-	inline v4sd& operator=(double other) {
-		x = _mm256_set1_pd(other);
-		return *this;
-	}
-	inline v4sd operator+(const v4sd& other) const {
-		v4sd r;
-		r.x = _mm256_add_pd(x, other.x);
-		return r;
-	}
-	inline v4sd operator-(const v4sd& other) const {
-		v4sd r;
-		r.x = _mm256_sub_pd(x, other.x);
-		return r;
-	}
-	inline v4sd operator*(const v4sd& other) const {
-		v4sd r;
-		r.x = _mm256_mul_pd(x, other.x);
-		return r;
-	}
-	inline v4sd operator/(const v4sd& other) const {
-		v4sd r;
-		r.x = _mm256_div_pd(x, other.x);
-		return r;
-	}
-	inline v4sd& operator+=(const v4sd& other) {
-		*this = *this + other;
-		return *this;
-	}
-	inline v4sd& operator-=(const v4sd& other) {
-		*this = *this - other;
-		return *this;
-	}
-	inline v4sd& operator*=(const v4sd& other) {
-		*this = *this * other;
-		return *this;
-	}
-	inline v4sd& operator/=(const v4sd& other) {
-		*this = *this / other;
-		return *this;
-	}
-	inline const double& operator[](int i) const {
-		const double* a = reinterpret_cast<const double*>(&x);
-		return a[i];
-	}
-	inline double& operator[](int i) {
-		double* a = reinterpret_cast<double*>(&x);
-		return a[i];
-	}
-};
-
-/*
- class v4sd {
- private:
- double x[4];
- public:
- inline v4sd& operator=(const v4sd& other) {
- for( int i = 0; i != 4; i++) {
- x[i] = other.x[i];
- }
- return *this;
- }
- inline v4sd(const v4sd& other) {
- for( int i = 0; i != 4; i++) {
- x[i] = other.x[i];
- }
- }
- inline v4sd() {
- }
- inline v4sd(const std::initializer_list<double>& other) {
- std::array<double, 4> n;
- auto j = other.begin();
- for (int i = 0; i != 4; ++i) {
- (*this)[i] = *j;
- ++j;
- }
- }
- inline v4sd& operator=(double other) {
- for( int i = 0; i != 4; i++) {
- x[i] = other;
- }
- return *this;
- return *this;
- }
- inline v4sd operator+(const v4sd& other) const {
- v4sd r;
- for( int i = 0; i != 4; i++) {
- r.x[i] = x[i] + other.x[i];
- }
- return r;
- }
- inline v4sd operator-(const v4sd& other) const {
- v4sd r;
- for( int i = 0; i != 4; i++) {
- r.x[i] = x[i] - other.x[i];
- }
- return r;
- }
- inline v4sd operator*(const v4sd& other) const {
- v4sd r;
- for( int i = 0; i != 4; i++) {
- r.x[i] = x[i] * other.x[i];
- }
- return r;
- }
- inline v4sd operator/(const v4sd& other) const {
- v4sd r;
- for( int i = 0; i != 4; i++) {
- r.x[i] = x[i] / other.x[i];
- }
- return r;
- }
- inline v4sd& operator+=(const v4sd& other) {
- *this = *this + other;
- return *this;
- }
- inline v4sd& operator-=(const v4sd& other) {
- *this = *this - other;
- return *this;
- }
- inline v4sd& operator*=(const v4sd& other) {
- *this = *this * other;
- return *this;
- }
- inline v4sd& operator/=(const v4sd& other) {
- *this = *this / other;
- return *this;
- }
- inline const double& operator[](int i) const {
- return x[i];
- }
- inline double& operator[](int i) {
- return x[i];
- }
- };
- */
 
 #else
 

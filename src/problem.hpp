@@ -21,6 +21,7 @@ public:
 	static vector_type set_outflow(const geo::direction& dir, vector_type&& u);
 	static bool refinement_test(integer, const std::vector<simd_vector>&,
 			const vector_type&, const std::array<vector_type, NDIM>&);
+	static vector_type to_output(const vector_type&);
 	static vector_type to_prim(const vector_type&);
 	static vector_type to_con(const vector_type&);
 	static std::pair<vector_type, simd_vector> physical_flux( const vector_type& , const vector_type&, integer dim);

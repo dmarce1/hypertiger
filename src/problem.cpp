@@ -22,9 +22,9 @@ static constexpr integer Sz_i = 4;
 
 static constexpr integer rho_i = 0;
 static constexpr integer eps_i = 1;
-static constexpr integer vx_i = 2;
-static constexpr integer vy_i = 3;
-static constexpr integer vz_i = 4;
+static constexpr integer ux_i = 2;
+static constexpr integer uy_i = 3;
+static constexpr integer uz_i = 4;
 
 static const simd_vector zero(0.0);
 static const simd_vector one(1.0);
@@ -36,13 +36,12 @@ euler_type::vector_type euler_type::initial_value(
 		const std::vector<simd_vector>& x, real) {
 	std::vector<simd_vector> u(NF);
 	for (integer i = 0; i != simd_len; ++i) {
-		if (x[ZDIM][i] > 0.0) {
-			u[D_i][i] = 1.0;
-			u[tau_i][i] = 1.0 + u[D_i][i];
-		} else {
-			u[D_i][i] = 1.0e-1;
-			u[tau_i][i] = 1.25e-1 + u[D_i][i];
-		}
+		real r = x[XDIM][i] * x[XDIM][i];
+		r += x[YDIM][i] * x[YDIM][i];
+		r += x[ZDIM][i] * x[ZDIM][i];
+		r = sqrt(r);
+		u[D_i][i] = 1.0e-4;
+		u[tau_i][i] = 1.0 * exp(-r / 0.05) + u[D_i][i];
 		u[Sx_i][i] = u[Sy_i][i] = u[Sz_i][i] = 0.0;
 	}
 	return u;
@@ -72,17 +71,19 @@ std::pair<euler_type::vector_type, simd_vector> euler_type::physical_flux(
 
 	const auto& rho = v[rho_i];
 	const auto& eps = v[eps_i];
-	const auto& vel = v[vx_i + dim];
-	const auto& vx = v[vx_i];
-	const auto& vy = v[vy_i];
-	const auto& vz = v[vz_i];
+	const auto& uel = v[ux_i + dim];
+	const auto& ux = v[ux_i];
+	const auto& uy = v[uy_i];
+	const auto& uz = v[uz_i];
 
-	const auto p = (fgamma - one) * rho * eps;
-	const auto v2 = vx * vx + vy * vy + vz * vz;
-	const auto W = sqrt(one / (one - v2));
+	const auto u2 = ux * ux + uy * uy + uz * uz;
+	const auto W = sqrt(one + u2);
 	const auto Winv = one / W;
+	const auto vel = uel * Winv;
+	const auto v2 = u2 * Winv * Winv;
+	const auto p = (fgamma - one) * rho * eps;
 	const auto h = rho * (one + eps) + p;
-	const auto hinv = h.inv();
+	const auto hinv = one / h;
 	const auto c2 = fgamma * p * h;
 	const auto vel2 = vel * vel;
 	f[D_i] = D * vel;
@@ -115,21 +116,20 @@ euler_type::vector_type euler_type::to_con(const vector_type& v) {
 
 	const auto& rho = v[rho_i];
 	const auto& eps = v[eps_i];
-	const auto& vx = v[vx_i];
-	const auto& vy = v[vy_i];
-	const auto& vz = v[vz_i];
+	const auto& ux = v[ux_i];
+	const auto& uy = v[uy_i];
+	const auto& uz = v[uz_i];
 
-	const auto v2 = vx * vx + vy * vy + vz * vz;
-	const auto W = sqrt(one / (one - v2));
-	const auto W2 = W * W;
+	const auto u2 = ux * ux + uy * uy + uz * uz;
+	const auto W = sqrt(one + u2);
 	const auto p = (fgamma - 1.0) * rho * eps;
 	const auto h = rho * (one + fgamma * eps);
-	const auto x = W2 * h;
+	const auto hW = W * h;
 	D = W * rho;
-	tau = x - p;
-	Sx = x * vx;
-	Sy = x * vy;
-	Sz = x * vz;
+	tau = hW * W - p;
+	Sx = hW * ux;
+	Sy = hW * uy;
+	Sz = hW * uz;
 
 	return u;
 }
@@ -146,9 +146,9 @@ euler_type::vector_type euler_type::to_prim(const vector_type& u) {
 
 	auto& rho = v[rho_i];
 	auto& eps = v[eps_i];
-	auto& vx = v[vx_i];
-	auto& vy = v[vy_i];
-	auto& vz = v[vz_i];
+	auto& ux = v[ux_i];
+	auto& uy = v[uy_i];
+	auto& uz = v[uz_i];
 
 	simd_vector W, vel, f, dfdv;
 	simd_vector S(sqrt(Sx * Sx + Sy * Sy + Sz * Sz));
@@ -156,7 +156,7 @@ euler_type::vector_type euler_type::to_prim(const vector_type& u) {
 	tau = max(tau, sqrt(S * S + D * D));
 
 	vel = S / D;
-	const auto Sinv = S.inv();
+	const auto Sinv = S.inv_or_zero();
 	vel = min(abs(vel), simd_vector(0.999));
 	for (int i = 0; i < 8; ++i) {
 		W = sqrt(one / (one - vel * vel));
@@ -171,18 +171,27 @@ euler_type::vector_type euler_type::to_prim(const vector_type& u) {
 		vel = min(one - b * (one - v0), vel);
 	}
 	W = sqrt(one / (one - vel * vel));
+	const auto SinvvelW = Sinv * vel * W;
 	rho = D / W;
 	eps = (tau / rho - W * W) / (fgamma * W * W - (fgamma - one));
-	vx = Sx * Sinv * vel;
-	vy = Sy * Sinv * vel;
-	vz = Sz * Sinv * vel;
+	ux = Sx * SinvvelW;
+	uy = Sy * SinvvelW;
+	uz = Sz * SinvvelW;
 	eps = max(eps, zero);
-	/*for( integer i = 0; i != 8; ++i) {
-	 if( eps[i] < 0.0 ) {
-	 printf( "%e %e %e\n", D[i], tau[i], S[i]);
-	 }
-	 }*/
+	return v;
+}
 
+euler_type::vector_type euler_type::to_output(const vector_type& u) {
+	auto v = to_prim(u);
+	auto& ux = v[ux_i];
+	auto& uy = v[uy_i];
+	auto& uz = v[uz_i];
+	const auto u2 = ux * ux + uy * uy + uz * uz;
+	const auto W = sqrt(one + u2);
+	const auto Winv = one / W;
+	ux *= Winv;
+	uy *= Winv;
+	uz *= Winv;
 	return v;
 }
 

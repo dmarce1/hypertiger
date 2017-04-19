@@ -311,7 +311,19 @@ grid::grid(const real _dx, std::array<real, NDIM> _xmin, bool initialize) {
 simd_grid<physics::NF> grid::primitives() const {
 	simd_grid<physics::NF> V;
 	for (integer i = 0; i != V_N3; ++i) {
-		V.set(physics::to_prim(U[i]), i);
+		const auto uin = U[i];
+		const auto vout = physics::to_prim(uin);
+		V.set(vout, i);
+	}
+	return V;
+}
+
+simd_grid<physics::NF> grid::output_vars() const {
+	simd_grid<physics::NF> V;
+	for (integer i = 0; i != V_N3; ++i) {
+		const auto uin = U[i];
+		const auto vout = physics::to_output(uin);
+		V.set(vout, i);
 	}
 	return V;
 }
@@ -345,7 +357,6 @@ real grid::compute_fluxes() {
 	}
 	return max_lambda.max();
 }
-
 
 void grid::store() {
 	U0 = U;
@@ -533,7 +544,7 @@ grid::output_list_type grid::get_output_list() const {
 	std::vector<zone_int_type>& zone_list = rc.zones;
 	std::array<std::vector<real>, physics::NF> &data = rc.data;
 
-	const auto V = primitives();
+	const auto V = output_vars();
 
 	zone_list.reserve(cube(NX - 2 * BW) * NCHILD);
 	for (integer i = BW; i != NX - BW; ++i) {
@@ -678,8 +689,7 @@ std::size_t grid::load(FILE* fp) {
 		static std::atomic<bool> statics_loaded(false);
 		bool expected = false;
 		if (statics_loaded.compare_exchange_strong(expected, true)) {
-			cnt += std::fread(&opts.xscale, sizeof(real), 1, fp)
-					* sizeof(real);
+			cnt += std::fread(&opts.xscale, sizeof(real), 1, fp) * sizeof(real);
 			statics_loaded = true;
 		} else {
 			std::size_t offset = sizeof(real);
