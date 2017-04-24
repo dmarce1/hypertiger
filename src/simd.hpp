@@ -56,7 +56,7 @@ constexpr std::size_t simd_len = 8;
 
 class simd_vector {
 private:
-	std::array<__mxd, SIMD_SIZE> v;
+	__mxd v[SIMD_SIZE];
 public:
 	inline simd_vector shuffle(integer dim) const {
 		simd_vector r;
@@ -91,12 +91,26 @@ public:
 		constexpr __m256d zero = { 0.0, 0.0, 0.0, 0.0 };
 		const __m256d one = { 1.0, 1.0, 1.0, 1.0 };
 		const auto* oneptr = reinterpret_cast<const double*>(&one);
-		for (integer d = 0; d != NDIM; ++d) {
+		{
+			constexpr integer d = 0;
 			const auto mask1_ = _mm256_cmp_pd(v[d], zero, _CMP_NEQ_UQ);
 			const auto mask2_ = _mm256_cmp_pd(v[d], zero, _CMP_EQ_UQ);
 			const auto mask1 = *(reinterpret_cast<const __m256i *>(&mask1_));
 			const auto mask2 = *(reinterpret_cast<const __m256i *>(&mask2_));
-			auto ptr = reinterpret_cast<const double*>(v.data() + d);
+			auto ptr = reinterpret_cast<const double*>(v + d);
+			auto a = _mm256_maskload_pd(ptr, mask1);
+			const auto* aptr = reinterpret_cast<const double*>(&a);
+			const auto b = _mm256_maskload_pd(oneptr, mask2);
+			a = _mm256_div_pd(one, _mm256_add_pd(a, b));
+			c.v[d] = _mm256_maskload_pd(aptr, mask1);
+		}
+		{
+			constexpr integer d = 1;
+			const auto mask1_ = _mm256_cmp_pd(v[d], zero, _CMP_NEQ_UQ);
+			const auto mask2_ = _mm256_cmp_pd(v[d], zero, _CMP_EQ_UQ);
+			const auto mask1 = *(reinterpret_cast<const __m256i *>(&mask1_));
+			const auto mask2 = *(reinterpret_cast<const __m256i *>(&mask2_));
+			auto ptr = reinterpret_cast<const double*>(v + d);
 			auto a = _mm256_maskload_pd(ptr, mask1);
 			const auto* aptr = reinterpret_cast<const double*>(&a);
 			const auto b = _mm256_maskload_pd(oneptr, mask2);
@@ -229,6 +243,7 @@ public:
 		const double f = std::min(c, d);
 		return std::min(e, f);
 	}
+	friend simd_vector log(const simd_vector&);
 	friend simd_vector sqrt(const simd_vector&);
 	friend simd_vector operator*(double, const simd_vector& other);
 	friend simd_vector operator/(double, const simd_vector& other);
@@ -331,6 +346,15 @@ inline simd_vector min(const simd_vector& a, const simd_vector& b) {
 
 inline simd_vector abs(const simd_vector& a) {
 	return max(a, -a);
+}
+
+inline simd_vector log(const simd_vector& a) {
+	simd_vector r;
+	//r.v[0] = _mm256_log_pd(a.v[0]);
+	//r.v[1] = _mm256_log_pd(a.v[1]);
+	for( integer i = 0; i != simd_len; ++i) {
+		r[i] = std::log(a[i]);
+	}
 }
 
 #else

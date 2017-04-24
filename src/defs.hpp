@@ -41,7 +41,7 @@ typedef unsigned char byte;
 
 constexpr integer NDIM = 3;
 
-constexpr integer INX = 8;
+constexpr integer INX = 12;
 constexpr integer BW = 2;
 constexpr integer NX = INX + 2 * BW;
 constexpr integer N3 = NX * NX * NX;

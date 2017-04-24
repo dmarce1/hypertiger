@@ -1,6 +1,5 @@
 #include "future.hpp"
 #include "grid.hpp"
-#include "problem.hpp"
 #include "options.hpp"
 #include "node_server.hpp"
 #include <silo.h>
@@ -12,6 +11,7 @@
 #include <hpx/include/runtime.hpp>
 #include <hpx/lcos/broadcast.hpp>
 #include <hpx/runtime/threads/run_as_os_thread.hpp>
+#include "physics/srhd.hpp"
 
 std::array<simd_vector, NDIM> grid::outflow_mask;
 
@@ -195,6 +195,21 @@ std::vector<real> grid::get_restrict() const {
 	return data;
 }
 
+std::vector<simd_vector> grid::sums() const {
+	std::vector<simd_vector> s(physics::NF, simd_vector(0.0));
+	const auto dV = simd_vector(dx * dx * dx);
+	for (integer i = 1; i != NX / 2 - 1; ++i) {
+		for (integer j = 1; j != NX / 2 - 1; ++j) {
+			for (integer k = 1; k != NX / 2 - 1; ++k) {
+				for (integer f = 0; f != physics::NF; ++f) {
+					s[f] += U(icoarse(i, j, k), f) * dV;
+				}
+			}
+		}
+	}
+	return s;
+}
+
 void grid::set_restrict(const std::vector<real>& data,
 		const geo::octant& octant) {
 
@@ -222,19 +237,16 @@ bool grid::refine_me(integer lev) const {
 	} else if (lev >= opts.max_level) {
 		rc = false;
 	} else {
-		std::vector<simd_vector> u(physics::NF);
-		std::array<std::vector<simd_vector>, NDIM> dudx;
-		for (integer d = 0; d != NDIM; ++d) {
-			dudx[d].resize(physics::NF);
-		}
+		physics::vector_type u, up, um;
+		std::array<physics::vector_type, NDIM> dudx;
 		for (integer i = 1; i != NX / 2 - 1 && !rc; ++i) {
 			for (integer j = 1; j != NX / 2 - 1 && !rc; ++j) {
 				for (integer k = 1; k != NX / 2 - 1 && !rc; ++k) {
 					const integer iii = icoarse(i, j, k);
 					u = U[iii];
 					for (integer d = 0; d != NDIM; ++d) {
-						const auto up = U.get_shift_vec(d, +1, iii);
-						const auto um = U.get_shift_vec(d, -1, iii);
+						U.get_shift_vec(up, d, +1, iii);
+						U.get_shift_vec(um, d, -1, iii);
 						for (integer f = 0; f != physics::NF; ++f) {
 							dudx[d][f] = (up[f] - um[f])
 									* simd_vector(0.5 / dx);
@@ -260,6 +272,12 @@ void grid::set_coordinates() {
 				X(i, j, k, XDIM) = (real(i - BW) + HALF) * dx + xmin[XDIM];
 				X(i, j, k, YDIM) = (real(j - BW) + HALF) * dx + xmin[YDIM];
 				X(i, j, k, ZDIM) = (real(k - BW) + HALF) * dx + xmin[ZDIM];
+				for (integer d = 0; d != NDIM; ++d) {
+					for (integer d1 = 0; d1 != NDIM; ++d1) {
+						Xf[d](i, j, k, d1) = X(i, j, k, d1);
+					}
+					Xf[d](i, j, k, d) -= HALF * dx;
+				}
 			}
 		}
 	}
@@ -299,31 +317,23 @@ grid::grid(const real _dx, std::array<real, NDIM> _xmin, bool initialize) {
 			for (integer j = 0; j != NX / 2; ++j) {
 				for (integer k = 0; k != NX / 2; ++k) {
 					const integer iii = icoarse(i, j, k);
-					const auto x = X[iii];
-					auto u = physics::initial_value(x, dx);
-					U.set(u, iii);
+					physics::initial_value(U[iii], X[iii], dx);
 				}
 			}
 		}
 	}
 }
 
-simd_grid<physics::NF> grid::primitives() const {
-	simd_grid<physics::NF> V;
+void grid::primitives() {
 	for (integer i = 0; i != V_N3; ++i) {
-		const auto uin = U[i];
-		const auto vout = physics::to_prim(uin);
-		V.set(vout, i);
+		physics::to_prim(V[i], U[i]);
 	}
-	return V;
 }
 
 simd_grid<physics::NF> grid::output_vars() const {
 	simd_grid<physics::NF> V;
 	for (integer i = 0; i != V_N3; ++i) {
-		const auto uin = U[i];
-		const auto vout = physics::to_output(uin);
-		V.set(vout, i);
+		physics::to_output(V[i], U[i]);
 	}
 	return V;
 }
@@ -332,7 +342,8 @@ real grid::compute_fluxes() {
 	simd_vector max_lambda(0.0);
 	simd_grid<physics::NF> VR;
 	simd_grid<physics::NF> VL;
-	const auto V = primitives();
+	physics::vector_type left, right;
+	primitives();
 	for (integer dim = 0; dim != NDIM; ++dim) {
 		for (integer i = 0; i != U.size(); ++i) {
 			const auto sp = V.get_shift(dim, +1, i) - V(i);
@@ -346,11 +357,12 @@ real grid::compute_fluxes() {
 			for (integer j = 1; j != NX / 2; ++j) {
 				for (integer k = 1; k != NX / 2; ++k) {
 					const integer iii = icoarse(i, j, k);
-					const auto left = VR.get_shift_vec(dim, -1, iii);
-					const auto right = VL[iii];
-					const auto f = physics::to_fluxes(left, right, dim);
-					F[dim].set(std::move(f.first), iii);
-					max_lambda = max(max_lambda, f.second);
+					VR.get_shift_vec(left, dim, -1, iii);
+					right = VL[iii];
+					simd_vector a;
+					const auto& xtmp = Xf[dim][iii];
+					physics::to_fluxes(F[dim][iii], a, left, right, dim, xtmp);
+					max_lambda = max(max_lambda, a);
 				}
 			}
 		}
@@ -391,13 +403,23 @@ void grid::set_physical_boundaries(const geo::face& face, real t) {
 			}
 		}
 	}
+	for (k = klb / 2; k != kub / 2; ++k) {
+		for (j = jlb / 2; j != jub / 2; ++j) {
+			for (i = ilb / 2; i != iub / 2; ++i) {
+				physics::set_outflow(U[icoarse(x, y, z)], face, dx);
+			}
+		}
+	}
 }
 
 void grid::compute_sources(real t) {
-	for (integer i = 0; i != V_N3; ++i) {
-		const auto u = U[i];
-		const auto s = physics::explicit_source(u);
-		dUdt.set(s, i);
+	for (integer i = 1; i != NX / 2 - 1; ++i) {
+		for (integer j = 1; j != NX / 2 - 1; ++j) {
+			for (integer k = 1; k != NX / 2 - 1; ++k) {
+				const integer iii = icoarse(i, j, k);
+				physics::explicit_source(dUdt[iii], U[iii], V[iii], X[iii]);
+			}
+		}
 	}
 }
 

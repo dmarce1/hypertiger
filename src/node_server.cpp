@@ -7,7 +7,6 @@
 
 #include "defs.hpp"
 #include "node_server.hpp"
-#include "problem.hpp"
 #include "future.hpp"
 #include "options.hpp"
 
@@ -390,9 +389,11 @@ void node_server::amr_driver() {
 		}
 		dt = rc.second;
 
+		auto sums = grid_ptr->sums();
+
 		hpx::threads::run_as_os_thread([=]()
 		{
-			printf("%i %e %e\n", int(next_step - 1), double(t), double(dt));
+			printf("!!! %i %e %e %e\n", int(next_step - 1), double(t), double(dt), sums[0].sum());
 		});
 		step_num = next_step;
 

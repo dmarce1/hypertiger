@@ -72,6 +72,8 @@ set(dependencies libsilo.a)
 
 # Octotiger executable
 set(source_files ${source_files}
+    src/physics/grhd.cpp
+    src/physics/srhd.cpp
     src/geometry.cpp
     src/grid.cpp
     src/main.cpp
@@ -81,10 +83,9 @@ set(source_files ${source_files}
     src/node_server.cpp
     src/node_server_actions.cpp
     src/options.cpp
-    src/problem.cpp
     src/real.cpp
-    src/stack_trace.cpp
     src/simd_grid.cpp
+    src/stack_trace.cpp
 )
 
 set(header_files
@@ -98,7 +99,8 @@ set(header_files
     src/node_location.hpp
     src/node_server.hpp
     src/options.hpp
-    src/problem.hpp
+    src/physics/srhd.hpp
+    src/physics/physics.hpp
     src/real.hpp
     src/simd.hpp
     src/space_vector.hpp

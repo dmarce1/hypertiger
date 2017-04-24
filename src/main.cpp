@@ -3,7 +3,6 @@
 #include "node_server.hpp"
 #include "node_client.hpp"
 #include "future.hpp"
-#include "problem.hpp"
 #include "options.hpp"
 
 #include <chrono>

@@ -13,7 +13,7 @@
 #include "defs.hpp"
 #include "space_vector.hpp"
 #include "geometry.hpp"
-#include "problem.hpp"
+#include "physics/physics.hpp"
 #include "real.hpp"
 
 #include <hpx/runtime/serialization/serialize.hpp>
@@ -43,10 +43,12 @@ private:
 	static std::array<simd_vector, NDIM> outflow_mask;
 
 	simd_grid<physics::NF> U;
+	simd_grid<physics::NF> V;
 	simd_grid<physics::NF> U0;
 	simd_grid<physics::NF> dUdt;
 	std::array<simd_grid<physics::NF>, NDIM> F;
 	simd_grid<NDIM> X;
+	std::array<simd_grid<NDIM>, NDIM> Xf;
 	real dx;
 	std::array<real, NDIM> xmin;
 	std::array<bool, NFACE> is_physical;
@@ -57,7 +59,8 @@ public:
 	real get_dx() const {
 		return dx;
 	}
-	simd_grid<physics::NF> primitives() const;
+	std::vector<simd_vector> sums() const;
+	void primitives();
 	simd_grid<physics::NF> output_vars() const;
 	void set_coordinates();
 	void set_hydro_boundary(const std::vector<simd_vector>&,

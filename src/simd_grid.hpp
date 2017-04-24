@@ -47,18 +47,21 @@ public:
 		const integer i2 = (k % 2) * 4 + (j % 2) * 2 + i % 2;
 		return data[i1 * NF + f][i2];
 	}
-	inline std::vector<simd_vector> operator[](integer i) const {
-		std::vector<simd_vector> v(NF);
-		const auto* base = data.data() + i * NF;
-		const auto len = sizeof(simd_vector) * NF;
-		std::memcpy(v.data(), base, len);
-		return v;
+	inline const std::array<simd_vector, NF>& operator[](integer i) const {
+		using type = std::array<simd_vector,NF>;
+		const auto* base = reinterpret_cast<const type*>(data.data() + i * NF);
+		return *base;
 	}
-	inline void set(const std::vector<simd_vector>& v, integer i) {
-		auto* base = data.data() + i * NF;
-		const auto len = sizeof(simd_vector) * NF;
-		std::memcpy(base, v.data(), len);
+	inline std::array<simd_vector, NF>& operator[](integer i) {
+		using type = std::array<simd_vector,NF>;
+		auto* base = reinterpret_cast<type*>(data.data() + i * NF);
+		return *base;
 	}
+//	inline void set(const std::vector<simd_vector>& v, integer i) {
+//		auto* base = data.data() + i * NF;
+//		const auto len = sizeof(simd_vector) * NF;
+//		std::memcpy(base, v.data(), len);
+//	}
 	inline simd_vector operator()(integer i, integer f) const {
 		return data[index(i, f)];
 	}
@@ -84,13 +87,11 @@ public:
 			return blend(b, a, dim);
 		}
 	}
-	inline std::vector<simd_vector> get_shift_vec(integer dim, integer sign,
+	inline void get_shift_vec(std::array<simd_vector,NF>& v, integer dim, integer sign,
 			integer i) const {
-		std::vector<simd_vector> v(NF);
 		for (integer f = 0; f != NF; ++f) {
 			v[f] = get_shift(dim, sign, i * NF + f);
 		}
-		return v;
 	}
 	template<class Arc>
 	inline void serialize(Arc& arc, const unsigned) {
