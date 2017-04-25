@@ -221,10 +221,6 @@ union z4_t {
 		}
 	}
 	void to_char_inv(const z4_char& c, integer dim) {
-		//	if (sizeof(f) != sizeof(c) || sizeof(array) != sizeof(c)) {
-		//		printf("UNION BUSTED %li %li %li\n", sizeof(f)/64, sizeof(c)/64,
-		//				sizeof(array)/64);
-		//	}
 		integer ti1, ti2;
 		vector n;
 		if (dim == 0) {
@@ -415,7 +411,7 @@ union z4_t {
 		F.f.A(k) += (Q - eta * f.alpha);
 
 		for (integer i = 0; i != NDIM; ++i) {
-			F.f.Z(i) += -f.K(i, k);
+			F.f.Z(i) -= f.K(i, k);
 		}
 
 		for (integer i = 0; i != NDIM; ++i) {
@@ -560,7 +556,7 @@ void grhd::set_outflow(vector_type& u, const geo::face& face, real dx) {
 
 void grhd::physical_flux(vector_type& f, simd_vector& a, const vector_type& u,
 		const vector_type& v, integer dim,
-		const std::array<simd_vector, NDIM>& X) {
+		const std::array<simd_vector, NDIM>& X, real t) {
 
 	const auto& v_z4 = get_z4(v);
 
@@ -587,15 +583,17 @@ void grhd::physical_flux(vector_type& f, simd_vector& a, const vector_type& u,
 	const auto p = (fgamma - one) * rho * eps;
 	const auto h = rho * (one + eps) + p;
 	const auto hinv = one / h;
-	const auto c2 = fgamma * p * h;
+	const auto c2 = fgamma * p * hinv;
 	const auto vel2 = vel * vel;
-	const auto ss = vel * (one + v_z4.f.alpha);
-	f[D_i] = D * ss;
-	f[Sx_i] = Sx * ss;
-	f[Sy_i] = Sy * ss;
-	f[Sz_i] = Sz * ss;
-	f[Sx_i + dim] += p;
-	f[tau_i] = (tau + p) * ss;
+	const auto ss = vel;
+	if (t > 4.0 * opts.xscale) {
+		f[D_i] = D * ss;
+		f[Sx_i] = Sx * ss;
+		f[Sy_i] = Sy * ss;
+		f[Sz_i] = Sz * ss;
+		f[Sx_i + dim] += p;
+		f[tau_i] = (tau + p) * ss;
+	}
 	const auto onemv2c2 = one - v2 * c2;
 	const auto onemv2c2inv = one / onemv2c2;
 	const auto onemc2 = one - c2;
@@ -603,13 +601,12 @@ void grhd::physical_flux(vector_type& f, simd_vector& a, const vector_type& u,
 	const auto a2 = onemv2c2inv * sqrt(c2 * Winv * (onemv2c2 - onemc2 * vel2));
 	a = (one + alpha) * (abs(a1) + a2);
 
-	const auto& ga = v_z4.f.gamma;
-	const auto g = ga(0, 0) + ga(1, 1) + ga(2, 2);
-	const auto speed = one + v_z4.f.alpha + half * g;
-	for (integer field = 0; field != srhd::NF; ++field) {
-		f[field] *= speed;
+	if (t > 4.0 * opts.xscale) {
+		const auto speed = one + v_z4.f.alpha;
+		for (integer field = 0; field != srhd::NF; ++field) {
+			f[field] *= speed;
+		}
 	}
-
 }
 
 void grhd::to_con(vector_type& u, const vector_type& v) {
@@ -713,31 +710,14 @@ void grhd::to_output(vector_type& v, const vector_type& u) {
 	for (integer f = srhd::NF; f != NF; ++f) {
 		v[f] = u[f];
 	}
-
-//	auto& v_z4 = get_z4(v);
-///	v_z4.f.alpha -= one;
-//	v_z4.f.gamma(0, 0) -= one;
-//	v_z4.f.gamma(1, 1) -= one;
-//	v_z4.f.gamma(2, 2) -= one;
 }
 
 void grhd::to_fluxes(vector_type& flux, simd_vector& a, vector_type& vl,
-		vector_type& vr, integer dim, const std::array<simd_vector, NDIM>& X) {
+		vector_type& vr, integer dim, const std::array<simd_vector, NDIM>& X,
+		real t) {
 
 	vector_type ur, ul, fr, fl;
 	simd_vector afr, afl, agl, agr;
-
-	auto& vl_z4 = get_z4(vl);
-	auto& vr_z4 = get_z4(vr);
-	simd_vector avg;
-//	avg = (vl_z4.f.alpha + vr_z4.f.alpha) * half;
-//	vl_z4.f.alpha = vr_z4.f.alpha = avg;
-	for (integer i = 0; i != NDIM; ++i) {
-		for (integer j = i; j != NDIM; ++j) {
-			//		avg = (vl_z4.f.gamma(i, j) + vr_z4.f.gamma(i, j)) * half;
-			//		vl_z4.f.gamma(i, j) = vr_z4.f.gamma(i, j) = avg;
-		}
-	}
 
 	to_con(ur, vr);
 	to_con(ul, vl);
@@ -746,15 +726,17 @@ void grhd::to_fluxes(vector_type& flux, simd_vector& a, vector_type& vl,
 	auto& fr_z4 = get_z4(fr);
 	auto& ul_z4 = get_z4(ul);
 	auto& ur_z4 = get_z4(ur);
-	physical_flux(fr, afr, ur, vr, dim, X);
-	physical_flux(fl, afl, ul, vl, dim, X);
+	physical_flux(fr, afr, ur, vr, dim, X, t);
+	physical_flux(fl, afl, ul, vl, dim, X, t);
 	ur_z4.flux(fr_z4, agr, dim, X);
 	ul_z4.flux(fl_z4, agl, dim, X);
 	const auto af = max(afr, afl);
 	const auto ag = max(agr, agl);
-	for (integer f = 0; f != srhd::NF; ++f) {
-		flux[f] = half * (fr[f] + fl[f]);
-		flux[f] -= half * af * (ur[f] - ul[f]);
+	if (t > 4.0 * opts.xscale) {
+		for (integer f = 0; f != srhd::NF; ++f) {
+			flux[f] = half * (fr[f] + fl[f]);
+			flux[f] -= half * af * (ur[f] - ul[f]);
+		}
 	}
 	for (integer f = srhd::NF; f != NF; ++f) {
 		const integer n = f - srhd::NF;
@@ -772,7 +754,7 @@ bool grhd::refinement_test(integer level,
 }
 
 void grhd::explicit_source(vector_type& s, const vector_type& u,
-		const vector_type& v, const std::array<simd_vector, NDIM>& X) {
+		const vector_type& v, const std::array<simd_vector, NDIM>& X, real t) {
 	std::fill(s.begin(), s.end(), simd_vector(0));
 
 	gr::scalar tau0;
@@ -805,15 +787,17 @@ void grhd::explicit_source(vector_type& s, const vector_type& u,
 
 	auto& s_z4 = get_z4(s);
 	auto& u_z4 = get_z4(u);
-	u_z4.source(s_z4, tau0, Si, Sij, X);
 
-	for (integer i = 0; i != NDIM; ++i) {
-		s[tau_i] -= Si(i) * u_z4.f.A(i);
-		s[Sx_i + i] -= u_z4.f.A(i) * tau0;
-		for (integer j = 0; j != NDIM; ++j) {
-			s[tau_i] += Sij(i, j) * u_z4.f.K(i, j);
-			for (integer k = 0; k != NDIM; ++k) {
-				s[Sx_i + k] += u_z4.f.D[k](i, j) * Sij(i, j);
+	u_z4.source(s_z4, tau0, Si, Sij, X);
+	if (t > 4.0 * opts.xscale) {
+		for (integer i = 0; i != NDIM; ++i) {
+			s[tau_i] -= Si(i) * u_z4.f.A(i);
+			s[Sx_i + i] -= u_z4.f.A(i) * tau0;
+			for (integer j = 0; j != NDIM; ++j) {
+				s[tau_i] += Sij(i, j) * u_z4.f.K(i, j);
+				for (integer k = 0; k != NDIM; ++k) {
+					s[Sx_i + k] += u_z4.f.D[k](i, j) * Sij(i, j);
+				}
 			}
 		}
 	}

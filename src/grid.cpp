@@ -338,7 +338,7 @@ simd_grid<physics::NF> grid::output_vars() const {
 	return V;
 }
 
-real grid::compute_fluxes() {
+real grid::compute_fluxes(real t) {
 	simd_vector max_lambda(0.0);
 	simd_grid<physics::NF> VR;
 	simd_grid<physics::NF> VL;
@@ -361,7 +361,7 @@ real grid::compute_fluxes() {
 					right = VL[iii];
 					simd_vector a;
 					const auto& xtmp = Xf[dim][iii];
-					physics::to_fluxes(F[dim][iii], a, left, right, dim, xtmp);
+					physics::to_fluxes(F[dim][iii], a, left, right, dim, xtmp, t);
 					max_lambda = max(max_lambda, a);
 				}
 			}
@@ -417,7 +417,7 @@ void grid::compute_sources(real t) {
 		for (integer j = 1; j != NX / 2 - 1; ++j) {
 			for (integer k = 1; k != NX / 2 - 1; ++k) {
 				const integer iii = icoarse(i, j, k);
-				physics::explicit_source(dUdt[iii], U[iii], V[iii], X[iii]);
+				physics::explicit_source(dUdt[iii], U[iii], V[iii], X[iii], t);
 			}
 		}
 	}

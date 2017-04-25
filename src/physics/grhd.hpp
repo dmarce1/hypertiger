@@ -37,11 +37,11 @@ public:
 	static void to_con(vector_type&, const vector_type&);
 	static void physical_flux(vector_type&, simd_vector&, const vector_type&,
 			const vector_type&, integer dim,
-			const std::array<simd_vector, NDIM>&);
+			const std::array<simd_vector, NDIM>&, real t);
 	static void to_fluxes(vector_type&, simd_vector&, vector_type&,
-			vector_type&, integer dim, const std::array<simd_vector, NDIM>&);
+			vector_type&, integer dim, const std::array<simd_vector, NDIM>&, real t);
 	static void explicit_source(vector_type& s, const vector_type& u,
-			const vector_type& v, const std::array<simd_vector, NDIM>&);
+			const vector_type& v, const std::array<simd_vector, NDIM>&, real t);
 	static void implicit_source(vector_type&, const vector_type&, real);
 	static std::vector<std::string> field_names();
 };

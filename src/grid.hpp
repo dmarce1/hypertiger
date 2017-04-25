@@ -94,7 +94,7 @@ public:
 	void allocate();
 	void store();
 	void restore();
-	real compute_fluxes();
+	real compute_fluxes(real t);
 	void compute_sources(real t);
 	void set_physical_boundaries(const geo::face&, real t);
 	std::vector<simd_vector> next_u(integer rk, real t, real dt,

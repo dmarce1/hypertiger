@@ -442,7 +442,7 @@ hpx::future<std::vector<simd_vector>> node_server::grid_step() {
 								{
 									f.get();        // propagate exceptions
 
-									real a = grid_ptr->compute_fluxes();
+									real a = grid_ptr->compute_fluxes(current_time);
 									hpx::future<void> fut_flux = is_refined ? hpx::make_ready_future() : exchange_flux_corrections();
 
 									if (rk == 0) {
