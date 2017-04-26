@@ -37,6 +37,7 @@ static const simd_vector two(2.0);
 static const simd_vector half(0.5);
 static const simd_vector fgamma(5.0 / 3.0);
 static const simd_vector mu = two;
+#define FLUID_START (4.0 * opts.xscale)
 
 namespace gr {
 
@@ -171,7 +172,11 @@ constexpr integer tensor::SIZE;
 constexpr integer tensor::index[NDIM][NDIM];
 
 union z4_t {
+#ifdef GRSHIFT
+	static constexpr integer NFIELD = 50;
+#else
 	static constexpr integer NFIELD = 38;
+#endif
 	typedef struct {
 		scalar alpha;
 		tensor gamma;
@@ -181,11 +186,18 @@ union z4_t {
 		scalar Em;
 		scalar Gp;
 		scalar Gm;
-		vector S;
 		tensor Dt1;
 		tensor Dt2;
 		tensor Lp;
 		tensor Lm;
+#ifdef GRSHIFT
+		vector Bt1;
+		vector Bt2;
+		vector Sp;
+		vector Sm;
+#else
+		vector S;
+#endif
 	} z4_char;
 	struct {
 		scalar alpha;
@@ -195,6 +207,10 @@ union z4_t {
 		vector Z;
 		tensor K;
 		tensor D[3];
+#ifdef GRSHIFT
+		vector beta;
+		std::array<vector, NDIM> B;
+#endif
 	} f;
 	simd_vector array[NFIELD];
 	z4_t(const z4_t& other) {
@@ -206,6 +222,9 @@ union z4_t {
 		if (pos > 0) {
 			c.Ep = c.Gp = zero;
 			for (integer i = 0; i != NDIM; ++i) {
+#ifdef GRSHIFT
+				c.Sp(i) = zero;
+#endif
 				for (integer j = i; j != NDIM; ++j) {
 					c.Lp(i, j) = zero;
 				}
@@ -213,6 +232,9 @@ union z4_t {
 		} else {
 			c.Em = c.Gm = zero;
 			for (integer i = 0; i != NDIM; ++i) {
+#ifdef GRSHIFT
+				c.Sm(i) = zero;
+#endif
 				for (integer j = i; j != NDIM; ++j) {
 					c.Lm(i, j) = zero;
 				}
@@ -248,6 +270,36 @@ union z4_t {
 		u.A(ti2) = c.At2;
 		u.Theta = half * (c.Em + c.Ep);
 		const auto Vn = half * (c.Ep - c.Em);
+#ifdef GRSHIFT
+		for (integer j = 0; j != NDIM; ++j) {
+			u.B[ti1](j) = c.Bt1(j);
+			u.B[ti2](j) = c.Bt2(j);
+		}
+		for (integer j = 0; j != NDIM; ++j) {
+			u.B[dim](j) = half * (c.Sp(j) - c.Sm(j));
+		}
+		u.B[dim](ti1) -= u.B[ti1](dim);
+		u.B[dim](ti2) -= u.B[ti2](dim);
+		u.B[dim](dim) -= u.Theta;
+		u.B[dim](dim) *= half;
+		vector S0;
+		for (integer i = 0; i != NDIM; ++i) {
+			S0(i) = half * (c.Sp(i) + c.Sm(i));
+		}
+		tensor Bsym;
+		for (integer i = 0; i != NDIM; ++i) {
+			for (integer j = i; j != NDIM; ++j) {
+				Bsym(i, j) = half * (u.B[i](j) + f.B[j](i));
+			}
+		}
+		auto TrBsym = zero;
+		for (integer i = 0; i != NDIM; ++i) {
+			TrBsym += Bsym(i, i);
+		}
+		u.Theta += TrBsym;
+#else
+		const vector S0(c.S);
+#endif
 		const auto K = half * (c.Gp + c.Gm) + two * u.Theta;
 		for (integer i = 0; i != NDIM; ++i) {
 			for (integer j = i; j != NDIM; ++j) {
@@ -255,9 +307,15 @@ union z4_t {
 				u.D[ti2](i, j) = c.Dt2(i, j);
 				u.K(i, j) = half * (c.Lp(i, j) + c.Lm(i, j));
 				u.K(i, j) += n(i) * n(j) * K;
+#ifdef GRSHIFT
+				if (((i != dim) && (j != dim)) || ((i == dim) && (j == dim))) {
+					u.K(i, j) += Bsym(i, j);
+					u.K(i, j) -= n(i) * n(j) * TrBsym;
+				}
+#endif
 				u.D[dim](i, j) = half * (c.Lp(i, j) - c.Lm(i, j));
-				u.D[dim](i, j) -= half * c.S(i) * delta(dim, j);
-				u.D[dim](i, j) -= half * c.S(j) * delta(dim, i);
+				u.D[dim](i, j) -= half * S0(i) * delta(dim, j);
+				u.D[dim](i, j) -= half * S0(j) * delta(dim, i);
 			}
 		}
 		u.D[dim](dim, dim) = zero;
@@ -265,7 +323,7 @@ union z4_t {
 		for (integer i = 0; i != NDIM; ++i) {
 			Dstar += u.D[dim](i, i);
 		}
-		u.D[dim](dim, dim) = u.A(dim) - Dstar + two * Vn - c.S(dim);
+		u.D[dim](dim, dim) = u.A(dim) - Dstar + two * Vn - S0(dim);
 		vector D;
 		vector E;
 		for (integer k = 0; k != NDIM; ++k) {
@@ -276,7 +334,7 @@ union z4_t {
 			}
 		}
 		for (integer i = 0; i != NDIM; ++i) {
-			u.Z(i) = half * (u.A(i) + D(i) - two * E(i) - c.S(i));
+			u.Z(i) = half * (u.A(i) + D(i) - two * E(i) - S0(i));
 		}
 	}
 	z4_char to_char(integer dim) {
@@ -306,6 +364,22 @@ union z4_t {
 		tensor lambda_k;
 		compute_traces(K, E, D);
 		auto lambda_n = zero;
+#ifdef GRSHIFT
+		tensor Bsym;
+		for (integer j = 0; j != NDIM; ++j) {
+			c.Bt1(j) = f.B[ti1](j);
+			c.Bt2(j) = f.B[ti2](j);
+		}
+		for (integer i = 0; i != NDIM; ++i) {
+			for (integer j = i; j != NDIM; ++j) {
+				Bsym(i, j) = half * (f.B[i](j) + f.B[j](i));
+			}
+		}
+		auto TrBsym = zero;
+		for (integer i = 0; i != NDIM; ++i) {
+			TrBsym += Bsym(i, i);
+		}
+#endif
 		for (integer i = 0; i != NDIM; ++i) {
 			V(i) = D(i) - E(i) - f.Z(i);
 		}
@@ -337,18 +411,38 @@ union z4_t {
 		c.At2 = u.A(ti2);
 		c.Ep = u.Theta + Vn;
 		c.Em = u.Theta - Vn;
+#ifdef GRSHIFT
+		c.Ep -= TrBsym;
+		c.Em -= TrBsym;
+#endif
 		const auto term1 = K - two * u.Theta;
 		simd_vector term2 = u.A(dim);
+		vector S0;
 		for (integer k = 0; k != NDIM; ++k) {
-			c.S(k) = u.A(k) - D(k) + two * V(k);
+			S0(k) = u.A(k) - D(k) + two * V(k);
 		}
+#ifdef GRSHIFT
+		for (integer k = 0; k != NDIM; ++k) {
+			auto term2 = delta(k, dim) * (f.Theta - TrBsym);
+			term2 += two * Bsym(k, dim);
+			c.Sp(k) = S0(k) + term2;
+			c.Sm(k) = S0(k) - term2;
+		}
+#else
+		c.S = S0;
+#endif
 		c.Gp = term1 + term2;
 		c.Gm = term1 - term2;
 		for (integer i = 0; i != NDIM; ++i) {
 			for (integer j = i; j != NDIM; ++j) {
 				c.Dt1(i, j) = u.D[ti1](i, j);
 				c.Dt2(i, j) = u.D[ti2](i, j);
-				const auto term1 = u.K(i, j) - n(i) * n(j) * K;
+				auto term1 = u.K(i, j) - n(i) * n(j) * K;
+#ifdef GRSHIFT
+				if (((i != dim) && (j != dim)) || ((i == dim) && (j == dim))) {
+					term1 -= Bsym(i, j) - n(i) * n(j) * TrBsym;
+				}
+#endif
 				const auto term2 = lambda_k(i, j) - n(i) * n(j) * lambda_n;
 				c.Lp(i, j) = term1 + term2;
 				c.Lm(i, j) = term1 - term2;
@@ -380,24 +474,18 @@ union z4_t {
 		vector E;
 		vector D;
 		vector V;
+		vector Qi;
 		tensor lambda_k;
 		compute_traces(K, E, D);
 		for (integer i = 0; i != NDIM; ++i) {
 			V(i) = D(i) - E(i) - f.Z(i);
+			Qi(i) = f.A(i) - D(i) + two * V(i);
 		}
 		for (integer i = 0; i != NDIM; ++i) {
 			for (integer j = i; j != NDIM; ++j) {
 				auto& lam = lambda_k(i, j);
-				lam = 0.0;
-				lam += f.D[k](i, j);
-				if (i == k) {
-					lam += half * (f.A(j) - D(j));
-					lam += V(j);
-				}
-				if (j == k) {
-					lam += half * (f.A(i) - D(i));
-					lam += V(i);
-				}
+				lam = f.D[k](i, j);
+				lam += half * (delta(i, k) * Qi(j) + delta(j, k) * Qi(i));
 			}
 		}
 
@@ -409,6 +497,12 @@ union z4_t {
 		F.f.Theta += (D(k) - E(k) - f.Z(k));
 
 		F.f.A(k) += (Q - eta * f.alpha);
+
+#ifdef GRSHIFT
+		for (integer i = 0; i != NDIM; ++i) {
+			F.f.B[k](i) = Qi(i) - eta * f.beta(i);
+		}
+#endif
 
 		for (integer i = 0; i != NDIM; ++i) {
 			F.f.Z(i) -= f.K(i, k);
@@ -424,6 +518,9 @@ union z4_t {
 			for (integer j = i; j != NDIM; ++j) {
 				F.f.D[k](i, j) += f.K(i, j);
 				F.f.D[k](i, j) -= eta * half * f.gamma(i, j);
+#ifdef GRSHIFT
+				F.f.D[k](i, j) -= half * (f.B[i](j) + f.B[j](i));
+#endif
 			}
 		}
 		a = one;
@@ -438,8 +535,12 @@ union z4_t {
 		scalar TrK = zero;
 		vector E;
 		vector D;
+		vector Qi;
 
 		compute_traces(TrK, E, D);
+		for (integer i = 0; i != NDIM; ++i) {
+			Qi(i) = f.A(i) + D(i) - two * (E(i) + f.Z(i));
+		}
 
 		for (integer i = 0; i != NDIM; ++i) {
 			TrS += Sij(i, i);
@@ -453,9 +554,21 @@ union z4_t {
 			S.f.A(i) = -eta * f.A(i);
 		}
 
+#ifdef GRSHIFT
+		for (integer i = 0; i != NDIM; ++i) {
+			S.f.beta(i) = -Qi(i);
+			for (integer j = 0; j != NDIM; ++j) {
+				S.f.B[i](j) = -eta * f.B[i](j);
+			}
+		}
+#endif
+
 		for (integer i = 0; i != NDIM; ++i) {
 			for (integer j = i; j != NDIM; ++j) {
 				S.f.gamma(i, j) = -two * f.K(i, j);
+#ifdef GRSHIFT
+				S.f.gamma(i, j) += f.B[i](j) + f.B[j](i);
+#endif
 			}
 		}
 
@@ -546,17 +659,20 @@ void grhd::set_outflow(vector_type& u, const geo::face& face, real dx) {
 	auto c = u_z4.to_char(d);
 	u_z4.suppress_char_dir(c, -2 * face.get_side() + 1);
 	u_z4.to_char_inv(c, d);
-	u_z4.f.alpha = 0.0;
+	u_z4.f.alpha = zero;
 	for (integer i = 0; i != NDIM; ++i) {
+#ifdef GRSHIFT
+		u_z4.f.beta(i) = zero;
+#endif
 		for (integer j = i; j != NDIM; ++j) {
-			u_z4.f.gamma(i, j) = 0.0;
+			u_z4.f.gamma(i, j) = zero;
 		}
 	}
 }
 
 void grhd::physical_flux(vector_type& f, simd_vector& a, const vector_type& u,
 		const vector_type& v, integer dim,
-		const std::array<simd_vector, NDIM>& X, real t) {
+		const std::array<simd_vector, NDIM>& X, real t, simd_vector beta) {
 
 	const auto& v_z4 = get_z4(v);
 
@@ -586,7 +702,7 @@ void grhd::physical_flux(vector_type& f, simd_vector& a, const vector_type& u,
 	const auto c2 = fgamma * p * hinv;
 	const auto vel2 = vel * vel;
 	const auto ss = vel;
-	if (t > 4.0 * opts.xscale) {
+	if (t > FLUID_START) {
 		f[D_i] = D * ss;
 		f[Sx_i] = Sx * ss;
 		f[Sy_i] = Sy * ss;
@@ -597,14 +713,21 @@ void grhd::physical_flux(vector_type& f, simd_vector& a, const vector_type& u,
 	const auto onemv2c2 = one - v2 * c2;
 	const auto onemv2c2inv = one / onemv2c2;
 	const auto onemc2 = one - c2;
+#ifdef GRSHIFT
+	const auto a1 = onemv2c2inv * onemc2 * vel - beta;
+#else
 	const auto a1 = onemv2c2inv * onemc2 * vel;
+#endif
 	const auto a2 = onemv2c2inv * sqrt(c2 * Winv * (onemv2c2 - onemc2 * vel2));
 	a = (one + alpha) * (abs(a1) + a2);
 
-	if (t > 4.0 * opts.xscale) {
+	if (t > FLUID_START) {
 		const auto speed = one + v_z4.f.alpha;
 		for (integer field = 0; field != srhd::NF; ++field) {
 			f[field] *= speed;
+#ifdef GRSHIFT
+			f[field] -= beta * u[field];
+#endif
 		}
 	}
 }
@@ -726,13 +849,13 @@ void grhd::to_fluxes(vector_type& flux, simd_vector& a, vector_type& vl,
 	auto& fr_z4 = get_z4(fr);
 	auto& ul_z4 = get_z4(ul);
 	auto& ur_z4 = get_z4(ur);
-	physical_flux(fr, afr, ur, vr, dim, X, t);
-	physical_flux(fl, afl, ul, vl, dim, X, t);
+	physical_flux(fr, afr, ur, vr, dim, X, t, ur_z4.f.beta(dim));
+	physical_flux(fl, afl, ul, vl, dim, X, t, ul_z4.f.beta(dim));
 	ur_z4.flux(fr_z4, agr, dim, X);
 	ul_z4.flux(fl_z4, agl, dim, X);
 	const auto af = max(afr, afl);
 	const auto ag = max(agr, agl);
-	if (t > 4.0 * opts.xscale) {
+	if (t > FLUID_START) {
 		for (integer f = 0; f != srhd::NF; ++f) {
 			flux[f] = half * (fr[f] + fl[f]);
 			flux[f] -= half * af * (ur[f] - ul[f]);
@@ -789,12 +912,15 @@ void grhd::explicit_source(vector_type& s, const vector_type& u,
 	auto& u_z4 = get_z4(u);
 
 	u_z4.source(s_z4, tau0, Si, Sij, X);
-	if (t > 4.0 * opts.xscale) {
+	if (t > FLUID_START) {
 		for (integer i = 0; i != NDIM; ++i) {
 			s[tau_i] -= Si(i) * u_z4.f.A(i);
 			s[Sx_i + i] -= u_z4.f.A(i) * tau0;
 			for (integer j = 0; j != NDIM; ++j) {
 				s[tau_i] += Sij(i, j) * u_z4.f.K(i, j);
+#ifdef GRSHIFT
+				s[Sx_i + i] += Si(j) * u_z4.f.B[i](j);
+#endif
 				for (integer k = 0; k != NDIM; ++k) {
 					s[Sx_i + k] += u_z4.f.D[k](i, j) * Sij(i, j);
 				}
@@ -854,6 +980,21 @@ std::vector<std::string> grhd::field_names() {
 	names[srhd::NF + 35] = "Dz_yy";
 	names[srhd::NF + 36] = "Dz_yz";
 	names[srhd::NF + 37] = "Dz_zz";
+#ifdef GRSHIFT
+	names[srhd::NF + 38] = "beta_x";
+	names[srhd::NF + 39] = "beta_y";
+	names[srhd::NF + 40] = "beta_z";
+	names[srhd::NF + 41] = "B_xx";
+	names[srhd::NF + 42] = "B_xy";
+	names[srhd::NF + 43] = "B_xz";
+	names[srhd::NF + 44] = "B_yx";
+	names[srhd::NF + 45] = "B_yy";
+	names[srhd::NF + 46] = "B_yz";
+	names[srhd::NF + 47] = "B_zx";
+	names[srhd::NF + 48] = "B_zy";
+	names[srhd::NF + 49] = "B_zz";
+
+#endif
 	return names;
 }
 
